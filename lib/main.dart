@@ -1,47 +1,68 @@
-// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'providers/admin_provider.dart';
-import 'screens/workspace_domain_screen.dart';
 import 'screens/merchant_login_screen.dart';
 import 'screens/admin_dashboard_shell.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 🌟 Read STORE_DOMAIN passed from flutter run --dart-define
+  const String storeDomain = String.fromEnvironment(
+    'STORE_DOMAIN',
+    defaultValue: 'bestbdbazar.shop.xylotechsolution.com',
+  );
+
+  // Check existing session
+  final prefs = await SharedPreferences.getInstance();
+  final String? token = prefs.getString('merchant_token');
+  final bool isLoggedIn = token != null && token.isNotEmpty;
+
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => AdminProvider()..initialize(),
-      child: const XyloMerchantAdminApp(),
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AdminProvider()),
+      ],
+      child: XyloMerchantAdminApp(
+        isLoggedIn: isLoggedIn,
+        storeDomain: storeDomain,
+      ),
     ),
   );
 }
 
 class XyloMerchantAdminApp extends StatelessWidget {
-  const XyloMerchantAdminApp({super.key});
+  final bool isLoggedIn;
+  final String storeDomain;
+
+  const XyloMerchantAdminApp({
+    super.key,
+    required this.isLoggedIn,
+    required this.storeDomain,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<AdminProvider>();
-
     return MaterialApp(
-      title: provider.storeName,
+      title: 'Merchant Portal',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark(useMaterial3: true).copyWith(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: provider.primaryColor,
-          brightness: Brightness.dark,
+      theme: ThemeData(
+        useMaterial3: true,
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: const Color(0xFF070B14),
+        primaryColor: const Color(0xFF059669),
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF059669),
+          secondary: Color(0xFF10B981),
+          surface: Color(0xFF0F172A),
         ),
+        fontFamily: 'Roboto',
       ),
-      home: provider.isInitializing
-          ? const Scaffold(
-              backgroundColor: Color(0xFF020617),
-              body: Center(child: CircularProgressIndicator()),
-            )
-          : !provider.isDomainResolved
-              ? const WorkspaceDomainScreen()
-              : !provider.isAuthenticated
-                  ? const MerchantLoginScreen()
-                  : const AdminDashboardShell(),
+      home: isLoggedIn
+          ? const AdminDashboardShell()
+          : MerchantLoginScreen(storeDomain: storeDomain),
     );
   }
 }

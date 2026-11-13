@@ -1,68 +1,64 @@
+// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
 import 'providers/admin_provider.dart';
 import 'screens/merchant_login_screen.dart';
-import 'screens/admin_dashboard_shell.dart';
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // 🌟 Read STORE_DOMAIN passed from flutter run --dart-define
-  const String storeDomain = String.fromEnvironment(
-    'STORE_DOMAIN',
-    defaultValue: 'bestbdbazar.shop.xylotechsolution.com',
-  );
-
-  // Check existing session
-  final prefs = await SharedPreferences.getInstance();
-  final String? token = prefs.getString('merchant_token');
-  final bool isLoggedIn = token != null && token.isNotEmpty;
-
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AdminProvider()),
       ],
-      child: XyloMerchantAdminApp(
-        isLoggedIn: isLoggedIn,
-        storeDomain: storeDomain,
-      ),
+      child: const MerchantPortalApp(),
     ),
   );
 }
 
-class XyloMerchantAdminApp extends StatelessWidget {
-  final bool isLoggedIn;
-  final String storeDomain;
+class MerchantPortalApp extends StatelessWidget {
+  const MerchantPortalApp({super.key});
 
-  const XyloMerchantAdminApp({
-    super.key,
-    required this.isLoggedIn,
-    required this.storeDomain,
-  });
+  static const String _envDomain = String.fromEnvironment(
+    'STORE_DOMAIN',
+    defaultValue: String.fromEnvironment(
+      'DEFAULT_TENANT_DOMAIN',
+      defaultValue: 'buynarabd.shop.xylotechsolution.com',
+    ),
+  );
+
+  static const String _envAppName = String.fromEnvironment(
+    'APP_NAME',
+    defaultValue: 'Merchant Portal',
+  );
+
+  static const String _envPrimaryHex = String.fromEnvironment(
+    'PRIMARY_COLOR',
+    defaultValue: '#5B9A42',
+  );
+
+  static Color _parseColor(String hex) {
+    String clean = hex.replaceAll('#', '').trim();
+    if (clean.length == 6) clean = 'FF$clean';
+    final int? val = int.tryParse(clean, radix: 16);
+    return val != null ? Color(val) : const Color(0xFF5B9A42);
+  }
 
   @override
   Widget build(BuildContext context) {
+    final Color brandColor = _parseColor(_envPrimaryHex);
     return MaterialApp(
-      title: 'Merchant Portal',
+      title: _envAppName,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF070B14),
-        primaryColor: const Color(0xFF059669),
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF059669),
-          secondary: Color(0xFF10B981),
-          surface: Color(0xFF0F172A),
+        scaffoldBackgroundColor: const Color(0xFFF3F7F2),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: brandColor,
+          primary: brandColor,
         ),
-        fontFamily: 'Roboto',
       ),
-      home: isLoggedIn
-          ? const AdminDashboardShell()
-          : MerchantLoginScreen(storeDomain: storeDomain),
+      home: const MerchantLoginScreen(storeDomain: _envDomain),
     );
   }
 }

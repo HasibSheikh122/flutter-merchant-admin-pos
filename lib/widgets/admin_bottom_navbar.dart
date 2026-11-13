@@ -1,6 +1,7 @@
 // lib/widgets/admin_bottom_navbar.dart
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class AdminBottomNavbar extends StatefulWidget {
   final int selectedIndex;
@@ -23,7 +24,11 @@ class AdminBottomNavbar extends StatefulWidget {
 class _AdminBottomNavbarState extends State<AdminBottomNavbar> {
   late final ScrollController _scrollController;
 
-  static const List<_NavItemData> _navItems = [
+  Color _primaryColor = const Color(0xFF10B981);
+  Color _secondaryColor = const Color(0xFF1E3A1A);
+  bool _useGradient = true;
+
+  static const _navItems = [
     _NavItemData(
       title: 'Overview',
       icon: Icons.dashboard_outlined,
@@ -79,7 +84,10 @@ class _AdminBottomNavbarState extends State<AdminBottomNavbar> {
   @override
   void initState() {
     super.initState();
+    _primaryColor = widget.activeColor;
+    _secondaryColor = widget.backgroundColor;
     _scrollController = ScrollController();
+    _loadSavedMobileColors();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollToIndex(widget.selectedIndex);
     });
@@ -88,9 +96,32 @@ class _AdminBottomNavbarState extends State<AdminBottomNavbar> {
   @override
   void didUpdateWidget(covariant AdminBottomNavbar oldWidget) {
     super.didUpdateWidget(oldWidget);
+    _loadSavedMobileColors();
     if (oldWidget.selectedIndex != widget.selectedIndex) {
       _scrollToIndex(widget.selectedIndex);
     }
+  }
+
+  Future<void> _loadSavedMobileColors() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? pHex = prefs.getString('mobile_app_primary_color');
+    final String? sHex = prefs.getString('mobile_app_secondary_color');
+    final bool useGrad = prefs.getBool('mobile_app_use_gradient') ?? true;
+
+    if (!mounted) return;
+    setState(() {
+      _primaryColor = _parseHex(pHex, widget.activeColor);
+      _secondaryColor = _parseHex(sHex, widget.backgroundColor);
+      _useGradient = useGrad;
+    });
+  }
+
+  Color _parseHex(String? hexStr, Color fallback) {
+    if (hexStr == null || hexStr.trim().isEmpty) return fallback;
+    String clean = hexStr.trim().replaceAll('#', '');
+    if (clean.length == 6) clean = 'FF$clean';
+    final int? val = int.tryParse(clean, radix: 16);
+    return val != null ? Color(val) : fallback;
   }
 
   @override
@@ -99,12 +130,12 @@ class _AdminBottomNavbarState extends State<AdminBottomNavbar> {
     super.dispose();
   }
 
-  // Active tab click korle auto-center scroll hobe
   void _scrollToIndex(int index) {
     if (!_scrollController.hasClients) return;
     const double approxItemWidth = 100.0;
     final double screenWidth = MediaQuery.of(context).size.width;
-    final double targetOffset = (index * approxItemWidth) - (screenWidth / 2) + (approxItemWidth / 2);
+    final double targetOffset =
+        (index * approxItemWidth) - (screenWidth / 2) + (approxItemWidth / 2);
 
     _scrollController.animateTo(
       targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
@@ -115,16 +146,32 @@ class _AdminBottomNavbarState extends State<AdminBottomNavbar> {
 
   @override
   Widget build(BuildContext context) {
+    final Color blendedEnd =
+        Color.lerp(_secondaryColor, _primaryColor, 0.38) ?? _primaryColor;
+
     return Container(
       decoration: BoxDecoration(
-        color: widget.backgroundColor,
+        color: _useGradient ? null : _secondaryColor,
+        gradient: _useGradient
+            ? LinearGradient(
+                colors: [_secondaryColor, blendedEnd],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              )
+            : null,
         borderRadius: const BorderRadius.only(
           topLeft: Radius.circular(24),
           topRight: Radius.circular(24),
         ),
+        border: Border(
+          top: BorderSide(
+            color: _primaryColor.withValues(alpha: 0.4),
+            width: 1.2,
+          ),
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.25),
+            color: _primaryColor.withValues(alpha: 0.22),
             blurRadius: 18,
             offset: const Offset(0, -5),
           ),
@@ -133,7 +180,6 @@ class _AdminBottomNavbarState extends State<AdminBottomNavbar> {
       child: SafeArea(
         child: SizedBox(
           height: 68,
-          // ScrollConfiguration diye Mouse, Trackpad, Touch shob drag enable kora hoyese
           child: ScrollConfiguration(
             behavior: const _CustomMouseAndTouchScrollBehavior(),
             child: SingleChildScrollView(
@@ -152,7 +198,9 @@ class _AdminBottomNavbarState extends State<AdminBottomNavbar> {
                   return _AnimatedNavButton(
                     item: item,
                     isSelected: isSelected,
-                    activeColor: widget.activeColor,
+                    primaryColor: _primaryColor,
+                    secondaryColor: _secondaryColor,
+                    useGradient: _useGradient,
                     onTap: () {
                       widget.onTabSelected(index);
                       _scrollToIndex(index);
@@ -168,7 +216,6 @@ class _AdminBottomNavbarState extends State<AdminBottomNavbar> {
   }
 }
 
-// Mouse diye drag-to-scroll enable korar behavior
 class _CustomMouseAndTouchScrollBehavior extends MaterialScrollBehavior {
   const _CustomMouseAndTouchScrollBehavior();
 
@@ -184,13 +231,17 @@ class _CustomMouseAndTouchScrollBehavior extends MaterialScrollBehavior {
 class _AnimatedNavButton extends StatefulWidget {
   final _NavItemData item;
   final bool isSelected;
-  final Color activeColor;
+  final Color primaryColor;
+  final Color secondaryColor;
+  final bool useGradient;
   final VoidCallback onTap;
 
   const _AnimatedNavButton({
     required this.item,
     required this.isSelected,
-    required this.activeColor,
+    required this.primaryColor,
+    required this.secondaryColor,
+    required this.useGradient,
     required this.onTap,
   });
 
@@ -226,23 +277,37 @@ class _AnimatedNavButtonState extends State<_AnimatedNavButton> {
             ),
             decoration: BoxDecoration(
               color: widget.isSelected
-                  ? widget.activeColor.withOpacity(0.22)
+                  ? (widget.useGradient
+                      ? null
+                      : widget.primaryColor.withValues(alpha: 0.85))
                   : (_isHovered
-                      ? Colors.white.withOpacity(0.12)
+                      ? Colors.white.withValues(alpha: 0.12)
                       : Colors.transparent),
+              gradient: (widget.isSelected && widget.useGradient)
+                  ? LinearGradient(
+                      colors: [
+                        widget.primaryColor,
+                        Color.lerp(widget.primaryColor, widget.secondaryColor,
+                                0.55) ??
+                            widget.secondaryColor,
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    )
+                  : null,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
                 color: widget.isSelected
-                    ? widget.activeColor.withOpacity(0.5)
+                    ? Colors.white.withValues(alpha: 0.45)
                     : (_isHovered
-                        ? Colors.white.withOpacity(0.25)
+                        ? Colors.white.withValues(alpha: 0.25)
                         : Colors.transparent),
                 width: 1.2,
               ),
               boxShadow: widget.isSelected
                   ? [
                       BoxShadow(
-                        color: widget.activeColor.withOpacity(0.35),
+                        color: widget.primaryColor.withValues(alpha: 0.45),
                         blurRadius: 10,
                         offset: const Offset(0, 3),
                       ),
@@ -268,7 +333,7 @@ class _AnimatedNavButtonState extends State<_AnimatedNavButton> {
                         ? Colors.white
                         : (_isHovered
                             ? Colors.white
-                            : Colors.white.withOpacity(0.65)),
+                            : Colors.white.withValues(alpha: 0.7)),
                     size: 20,
                   ),
                 ),
@@ -280,7 +345,7 @@ class _AnimatedNavButtonState extends State<_AnimatedNavButton> {
                         ? Colors.white
                         : (_isHovered
                             ? Colors.white
-                            : Colors.white.withOpacity(0.65)),
+                            : Colors.white.withValues(alpha: 0.7)),
                     fontSize: 10,
                     fontWeight: widget.isSelected
                         ? FontWeight.w900

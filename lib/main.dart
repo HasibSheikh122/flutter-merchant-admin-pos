@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'core/config/tenant_config.dart';
 import 'providers/admin_provider.dart';
 import 'screens/merchant_login_screen.dart';
 import 'screens/admin_dashboard_shell.dart';
@@ -9,21 +10,11 @@ import 'screens/admin_dashboard_shell.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  const String envDomain = String.fromEnvironment(
-    'STORE_DOMAIN',
-    defaultValue: String.fromEnvironment(
-      'DEFAULT_TENANT_DOMAIN',
-      defaultValue: '',
-    ),
-  );
-  const String envSub = String.fromEnvironment(
-    'TENANT_SUBDOMAIN',
-    defaultValue: '',
-  );
+  const String envDomain = TenantConfig.storeDomain;
+  const String envSub = TenantConfig.defaultSubdomain;
 
   final prefs = await SharedPreferences.getInstance();
 
-  // Jodi --dart-define=STORE_DOMAIN dewa thake, tobe ager onno store-er cache clear kore ei store lock korbe
   if (envDomain.trim().isNotEmpty || envSub.trim().isNotEmpty) {
     String cleanDom = envDomain
         .trim()
@@ -84,28 +75,12 @@ class MerchantPortalApp extends StatelessWidget {
     required this.storeDomain,
   });
 
-  static const String _envAppName = String.fromEnvironment(
-    'APP_NAME',
-    defaultValue: 'Merchant Portal',
-  );
-
-  static const String _envPrimaryHex = String.fromEnvironment(
-    'PRIMARY_COLOR',
-    defaultValue: '#059669',
-  );
-
-  static Color _parseColor(String hex) {
-    String clean = hex.replaceAll('#', '').trim();
-    if (clean.length == 6) clean = 'FF$clean';
-    final int? val = int.tryParse(clean, radix: 16);
-    return val != null ? Color(val) : const Color(0xFF059669);
-  }
-
   @override
   Widget build(BuildContext context) {
-    final Color brandColor = _parseColor(_envPrimaryHex);
+    final Color brandColor =
+        TenantConfig.parseHexColor(TenantConfig.defaultPrimaryColorHex);
     return MaterialApp(
-      title: _envAppName,
+      title: TenantConfig.defaultAppName,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,

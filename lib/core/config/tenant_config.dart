@@ -19,7 +19,7 @@ class TenantConfig {
 
   static const String defaultAppName = String.fromEnvironment(
     'APP_NAME',
-    defaultValue: 'BestBdBazar',
+    defaultValue: 'BestBdBazar Admin',
   );
 
   static const String defaultAppSlogan = String.fromEnvironment(
@@ -71,7 +71,8 @@ class TenantConfig {
     return 'https://$clean';
   }
 
-  static Color parseHexColor(String hex, {Color fallback = const Color(0xFF059669)}) {
+  static Color parseHexColor(String? hex, {Color fallback = const Color(0xFF059669)}) {
+    if (hex == null || hex.trim().isEmpty) return fallback;
     String clean = hex.replaceAll('#', '').trim();
     if (clean.length == 6) clean = 'FF$clean';
     final int? val = int.tryParse(clean, radix: 16);

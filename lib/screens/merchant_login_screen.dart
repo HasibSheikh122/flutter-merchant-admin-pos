@@ -1,6 +1,8 @@
 // lib/screens/merchant_login_screen.dart
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'admin_dashboard_shell.dart';
@@ -42,15 +44,16 @@ class _MerchantLoginScreenState extends State
   bool _obscurePassword = true;
   String? _errorMessage;
 
-  // Dynamic Tenant Domain & API Base State
   String _activeDomain = '';
   String _activeSubdomain = '';
-  String _customApiBase = '';
   String _resolvedWorkingApiBase = '';
 
-  String _storeName = 'Merchant Admin';
+  String _storeName = const String.fromEnvironment(
+    'APP_NAME',
+    defaultValue: 'Merchant Portal',
+  );
   String? _logoUrl;
-  Color _brandColor = const Color(0xFF5B9A42);
+  Color _brandColor = const Color(0xFF059669);
 
   late AnimationController _pulseController;
   late Animation _scaleAnimation;
@@ -60,10 +63,21 @@ class _MerchantLoginScreenState extends State
     'TENANT_SUBDOMAIN',
     defaultValue: '',
   );
+  static const String _envAppName = String.fromEnvironment(
+    'APP_NAME',
+    defaultValue: '',
+  );
+  static const String _envAppIconUrl = String.fromEnvironment(
+    'APP_ICON_URL',
+    defaultValue: '',
+  );
+  static const String _envPrimaryColor = String.fromEnvironment(
+    'PRIMARY_COLOR',
+    defaultValue: '',
+  );
 
   static const String _platformRootDomain = 'shop.xylotechsolution.com';
 
-  // Standard Chrome Mobile User-Agent so Cloudflare never blocks Flutter requests
   static const String _browserUserAgent =
       'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
 
@@ -84,7 +98,7 @@ class _MerchantLoginScreenState extends State
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOutSine),
     );
 
-    _initTenantAndFetchBranding();
+    _initLockedTenantAndFetchBranding();
   }
 
   @override
@@ -93,6 +107,16 @@ class _MerchantLoginScreenState extends State
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  Color? _parseHexColor(String? rawHex) {
+    if (rawHex == null || rawHex.trim().isEmpty) return null;
+    final String clean = rawHex.trim().replaceAll('#', '');
+    if (clean.length == 6) {
+      final int? v = int.tryParse('FF$clean', radix: 16);
+      if (v != null) return Color(v);
+    }
+    return null;
   }
 
   String _cleanHost(String raw) {
@@ -122,7 +146,7 @@ class _MerchantLoginScreenState extends State
           firstPart != '192') {
         return firstPart;
       }
-      if (parts.length >= 2 && firstPart == 'www') {
+      if (parts.length != 1 && firstPart == 'www') {
         return parts[1].toString();
       }
     }
@@ -148,7 +172,107 @@ class _MerchantLoginScreenState extends State
     return clean;
   }
 
-  // Candidate API Bases: tries Tenant Domain + Caddy Root Domains + Custom Server
+  Future _loadEmbeddedTenantConfigJson() async {
+    if (kIsWeb && widget.storeDomain.trim().isNotEmpty) {
+      return {};
+    }
+    for (final path in ['assets/tenant_config.json', 'tenant_config.json']) {
+      try {
+        final String raw = await rootBundle.loadString(path);
+        final dynamic decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          return Map.from(decoded);
+        }
+      } catch (_) {}
+    }
+    return {};
+  }
+
+  Future _initLockedTenantAndFetchBranding() async {
+    final prefs = await SharedPreferences.getInstance();
+    final dynamic embeddedRaw = await _loadEmbeddedTenantConfigJson();
+    final Map embedded = embeddedRaw is Map ? embeddedRaw : {};
+
+    // 1. PRIORITY 1: Explicit --dart-define=STORE_DOMAIN / TENANT_SUBDOMAIN
+    String lockedDomain = widget.storeDomain.trim();
+    String lockedSub = _envSubdomain.trim().toLowerCase();
+
+    if (lockedDomain.isNotEmpty && lockedSub.isEmpty) {
+      lockedSub = _extractSubdomain(lockedDomain);
+    } else if (lockedSub.isNotEmpty && lockedDomain.isEmpty) {
+      lockedDomain = '$lockedSub.$_platformRootDomain';
+    }
+
+    // 2. PRIORITY 2: Embedded tenant_config.json (used in patched APKs when --dart-define wasn't passed)
+    final String embSub =
+        (embedded['subdomain'] ?? '').toString().trim().toLowerCase();
+    final String embDom = (embedded['store_domain'] ?? '').toString().trim();
+
+    if (lockedDomain.isEmpty && embDom.isNotEmpty) {
+      lockedDomain = embDom;
+    }
+    if (lockedSub.isEmpty && embSub.isNotEmpty) {
+      lockedSub = embSub;
+    }
+
+    // 3. PRIORITY 3: Saved SharedPreferences fallback
+    if (lockedDomain.isEmpty) {
+      final String savedDom = prefs.getString('locked_tenant_domain') ?? '';
+      if (savedDom.isNotEmpty) {
+        lockedDomain = savedDom;
+        lockedSub = _extractSubdomain(savedDom);
+      }
+    }
+
+    // Only use embedded branding (name/icon/color) if embedded subdomain matches our active lockedSub!
+    final bool useEmbeddedBranding =
+        embSub.isNotEmpty && lockedSub.isNotEmpty && embSub == lockedSub;
+
+    String lockedName = _envAppName.trim();
+    if (lockedName.isEmpty && useEmbeddedBranding) {
+      lockedName = (embedded['store_name'] ?? embedded['app_name'] ?? '')
+          .toString()
+          .trim();
+    }
+
+    String lockedIcon = _envAppIconUrl.trim();
+    if (lockedIcon.isEmpty && useEmbeddedBranding) {
+      lockedIcon = (embedded['app_icon_url'] ?? '').toString().trim();
+    }
+
+    String lockedColorHex = _envPrimaryColor.trim();
+    if (lockedColorHex.isEmpty && useEmbeddedBranding) {
+      lockedColorHex = (embedded['primary_color'] ?? '').toString().trim();
+    }
+
+    if (lockedDomain.isNotEmpty) {
+      await prefs.setString('locked_tenant_domain', _cleanHost(lockedDomain));
+    }
+    if (lockedSub.isNotEmpty) {
+      await prefs.setString('active_subdomain', lockedSub);
+      await prefs.setString('locked_tenant_subdomain', lockedSub);
+    }
+
+    if (mounted) {
+      setState(() {
+        _activeDomain = _cleanHost(lockedDomain);
+        _activeSubdomain = lockedSub;
+        if (lockedName.isNotEmpty) {
+          _storeName = lockedName;
+        } else if (_activeSubdomain.isNotEmpty) {
+          _storeName = _activeSubdomain.toUpperCase();
+        }
+        _logoUrl = lockedIcon.isNotEmpty ? lockedIcon : null;
+        final Color? parsedColor = _parseHexColor(lockedColorHex);
+        if (parsedColor != null) {
+          _brandColor = parsedColor;
+        }
+      });
+    }
+
+    await _fetchStoreBranding();
+  }
+
   List _buildCandidateApiBases() {
     final List candidates = [];
 
@@ -159,37 +283,19 @@ class _MerchantLoginScreenState extends State
       }
     }
 
-    if (_customApiBase.isNotEmpty) {
-      addCandidate(_customApiBase);
-    }
     if (widget.apiBaseOverride.trim().isNotEmpty) {
       addCandidate(widget.apiBaseOverride);
     }
     if (_resolvedWorkingApiBase.isNotEmpty) {
       addCandidate(_resolvedWorkingApiBase);
     }
-
-    // 1. Tenant's own domain (e.g. nextlook.shop.xylotechsolution.com, buynarabd.com)
-    if (_activeDomain.isNotEmpty &&
-        !_activeDomain.contains('localhost') &&
-        !_activeDomain.startsWith('127.0.0.1')) {
-      addCandidate(_activeDomain);
-    }
-
-    // 2. Tenant's *.shop.xylotechsolution.com domain
-    if (_activeSubdomain.isNotEmpty) {
-      addCandidate('https://$_activeSubdomain.$_platformRootDomain');
-    }
-
-    // 3. Direct Caddy 1st-level Cloudflare domains (always valid SSL on mobile!)
-    addCandidate('https://$_platformRootDomain');
-    addCandidate('https://buynarabd.com');
-    addCandidate('https://bestbdbazar.com');
-
-    // 4. Local development fallbacks
     if (_activeDomain.isNotEmpty) {
       addCandidate(_activeDomain);
     }
+    if (_activeSubdomain.isNotEmpty) {
+      addCandidate('https://$_activeSubdomain.$_platformRootDomain');
+    }
+    addCandidate('https://$_platformRootDomain');
     addCandidate('http://127.0.0.1:8000');
     addCandidate('http://10.0.2.2:8000');
 
@@ -203,56 +309,14 @@ class _MerchantLoginScreenState extends State
         : 'https://$_platformRootDomain';
   }
 
-  Future _initTenantAndFetchBranding() async {
-    final prefs = await SharedPreferences.getInstance();
-
-    final String savedDomain = prefs.getString('locked_tenant_domain') ?? '';
-    final String savedSub = prefs.getString('active_subdomain') ?? '';
-    final String savedApiBase = prefs.getString('custom_api_base_url') ?? '';
-    final String lastWorkingApi = prefs.getString('api_base_url') ?? '';
-
-    String initialDomain = widget.storeDomain.trim();
-    if (initialDomain.isEmpty) {
-      initialDomain = savedDomain;
-    }
-    if (initialDomain.isEmpty && _envSubdomain.isNotEmpty) {
-      initialDomain = '$_envSubdomain.$_platformRootDomain';
-    }
-    if (initialDomain.isEmpty && savedSub.isNotEmpty) {
-      initialDomain = '$savedSub.$_platformRootDomain';
-    }
-    if (initialDomain.isEmpty) {
-      initialDomain = _platformRootDomain;
-    }
-
-    String initialSub = _extractSubdomain(initialDomain);
-    if (initialSub.isEmpty && savedSub.isNotEmpty) {
-      initialSub = savedSub;
-    }
-
-    setState(() {
-      _activeDomain = _cleanHost(initialDomain);
-      _activeSubdomain = initialSub;
-      _customApiBase = savedApiBase;
-      if (lastWorkingApi.isNotEmpty &&
-          !lastWorkingApi.contains('127.0.0.1') &&
-          !lastWorkingApi.contains('localhost')) {
-        _resolvedWorkingApiBase = lastWorkingApi;
-      }
-      _storeName = _activeSubdomain.isNotEmpty
-          ? _activeSubdomain.toUpperCase()
-          : 'MERCHANT PORTAL';
-    });
-
-    await _fetchStoreBranding();
-  }
-
-  Map<String, String> _buildTenantHeaders({bool isJsonPost = false}) {
-    final Map<String, String> h = {
+  _buildTenantHeaders({bool isJsonPost = false}) {
+    final h = {
       'Accept': 'application/json',
       'User-Agent': _browserUserAgent,
-      if (isJsonPost) 'Content-Type': 'application/json',
     };
+    if (isJsonPost) {
+      h['Content-Type'] = 'application/json';
+    }
     if (_activeSubdomain.isNotEmpty) {
       h['X-Tenant-Subdomain'] = _activeSubdomain;
       h['x-subdomain'] = _activeSubdomain;
@@ -267,8 +331,8 @@ class _MerchantLoginScreenState extends State
   Future _fetchStoreBranding() async {
     final List candidates = _buildCandidateApiBases();
 
-    for (int i = 0; candidates.length > i; i++) {
-      final String base = candidates[i].toString();
+    for (final dynamic cand in candidates) {
+      final String base = cand.toString();
       try {
         final String subQuery = _activeSubdomain.isNotEmpty
             ? '?subdomain=${Uri.encodeComponent(_activeSubdomain)}'
@@ -284,7 +348,11 @@ class _MerchantLoginScreenState extends State
           final dynamic data = _safeJsonDecode(res.body);
           if (data is Map) {
             _resolvedWorkingApiBase = base;
-            final rawLogo = data['logo'] ?? data['store_logo'];
+            final Map appDist = (data['app_distribution'] is Map)
+                ? Map.from(data['app_distribution'] as Map)
+                : {};
+            final dynamic rawLogo =
+                appDist['app_icon_url'] ?? data['logo'] ?? data['store_logo'];
             String? resolvedLogo;
 
             if (rawLogo is String && rawLogo.isNotEmpty) {
@@ -298,34 +366,31 @@ class _MerchantLoginScreenState extends State
 
             if (mounted) {
               setState(() {
-                if (data['store_name'] != null &&
-                    data['store_name'].toString().trim().isNotEmpty) {
-                  _storeName = data['store_name'].toString().trim();
-                } else if (_activeSubdomain.isNotEmpty) {
-                  _storeName = _activeSubdomain.toUpperCase();
+                final String fetchedName =
+                    (data['store_name'] ?? appDist['app_name'] ?? '')
+                        .toString()
+                        .trim();
+                if (fetchedName.isNotEmpty) {
+                  _storeName = fetchedName;
                 }
-                if (data['subdomain'] != null &&
-                    data['subdomain'].toString().trim().isNotEmpty) {
-                  _activeSubdomain = data['subdomain'].toString().trim();
+                if (resolvedLogo != null && resolvedLogo.isNotEmpty) {
+                  _logoUrl = resolvedLogo;
                 }
-                _logoUrl = resolvedLogo;
-                if (data['primary_color'] != null) {
-                  final String hex =
-                      data['primary_color'].toString().replaceAll('#', '');
-                  if (hex.length == 6) {
-                    final int? parsed = int.tryParse('FF$hex', radix: 16);
-                    if (parsed != null) _brandColor = Color(parsed);
-                  }
+                final Color? parsedColor = _parseHexColor(
+                  (data['primary_color'] ?? appDist['primary_color'] ?? '')
+                      .toString(),
+                );
+                if (parsedColor != null) {
+                  _brandColor = parsedColor;
                 }
               });
             }
-            return;
+            return null;
           }
         }
-      } catch (_) {
-        // Try next candidate URL
-      }
+      } catch (_) {}
     }
+    return null;
   }
 
   dynamic _safeJsonDecode(String rawBody) {
@@ -338,7 +403,7 @@ class _MerchantLoginScreenState extends State
 
   Future _handleLogin() async {
     final FormState? formState = _formKey.currentState as FormState?;
-    if (formState != null && !formState.validate()) return;
+    if (formState != null && !formState.validate()) return null;
 
     setState(() {
       _isLoading = true;
@@ -353,6 +418,7 @@ class _MerchantLoginScreenState extends State
       'password': password,
       if (_activeSubdomain.isNotEmpty) 'subdomain': _activeSubdomain,
       if (_activeDomain.isNotEmpty) 'domain': _activeDomain,
+      'strict_tenant_lock': true,
     };
     final String body = jsonEncode(payloadMap);
 
@@ -369,11 +435,11 @@ class _MerchantLoginScreenState extends State
     String? serverAuthError;
     String? lastNetworkError;
 
-    for (int b = 0; candidateBases.length > b; b++) {
-      final String base = candidateBases[b].toString();
+    for (final dynamic baseObj in candidateBases) {
+      final String base = baseObj.toString();
 
-      for (int p = 0; loginPaths.length > p; p++) {
-        final String path = loginPaths[p].toString();
+      for (final dynamic pathObj in loginPaths) {
+        final String path = pathObj.toString();
         final String fullUrl = '$base$path';
 
         try {
@@ -395,39 +461,47 @@ class _MerchantLoginScreenState extends State
           }
 
           if (response.statusCode == 200) {
-            final String token =
-                (data['access'] ?? data['token'] ?? '').toString();
-            final String refreshToken = (data['refresh'] ?? '').toString();
             final Map user =
                 (data['user'] is Map) ? Map.from(data['user'] as Map) : {};
             final Map storeObj =
                 (data['store'] is Map) ? Map.from(data['store'] as Map) : {};
 
-            String finalSubdomain = (data['subdomain'] ??
+            final String returnedSubdomain = (data['subdomain'] ??
                     storeObj['subdomain'] ??
                     user['subdomain'] ??
-                    _activeSubdomain)
+                    '')
                 .toString()
-                .trim();
-            if (finalSubdomain.isEmpty) {
-              finalSubdomain = _extractSubdomain(_activeDomain);
+                .trim()
+                .toLowerCase();
+
+            // Strict Tenant Check: Only the owner of this locked store can log in
+            if (_activeSubdomain.isNotEmpty &&
+                returnedSubdomain.isNotEmpty &&
+                returnedSubdomain != _activeSubdomain.toLowerCase()) {
+              serverAuthError =
+                  'এই অ্যাপটি শুধুমাত্র $_storeName ($_activeSubdomain) স্টোরের জন্য জেনারেট করা হয়েছে! অন্য কোনো মার্চেন্ট অ্যাকাউন্ট দিয়ে এখানে লগইন করা যাবে না।';
+              break;
             }
 
-            String finalStoreName =
-                (storeObj['name'] ?? storeObj['store_name'] ?? _storeName)
+            final String token =
+                (data['access'] ?? data['token'] ?? '').toString();
+            final String refreshToken = (data['refresh'] ?? '').toString();
+
+            final String finalSubdomain = _activeSubdomain.isNotEmpty
+                ? _activeSubdomain
+                : returnedSubdomain;
+
+            final String finalStoreName = _storeName.isNotEmpty
+                ? _storeName
+                : (storeObj['name'] ??
+                        storeObj['store_name'] ??
+                        finalSubdomain.toUpperCase())
                     .toString()
                     .trim();
-            if (finalStoreName.isEmpty && finalSubdomain.isNotEmpty) {
-              finalStoreName = finalSubdomain.toUpperCase();
-            }
 
-            String finalDomain = _activeDomain;
-            if (storeObj['domain'] != null &&
-                storeObj['domain'].toString().trim().isNotEmpty) {
-              finalDomain = _cleanHost(storeObj['domain'].toString());
-            } else if (finalDomain.isEmpty && finalSubdomain.isNotEmpty) {
-              finalDomain = '$finalSubdomain.$_platformRootDomain';
-            }
+            final String finalDomain = _activeDomain.isNotEmpty
+                ? _activeDomain
+                : '$finalSubdomain.$_platformRootDomain';
 
             final prefs = await SharedPreferences.getInstance();
             await prefs.setString('merchant_token', token);
@@ -444,7 +518,7 @@ class _MerchantLoginScreenState extends State
             }
             await prefs.setString('merchant_user', jsonEncode(user));
 
-            if (!mounted) return;
+            if (!mounted) return null;
 
             Navigator.pushReplacement(
               context,
@@ -452,7 +526,7 @@ class _MerchantLoginScreenState extends State
                 builder: (context) => const AdminDashboardShell(),
               ),
             );
-            return;
+            return null;
           } else {
             final String err = (data['detail'] ??
                     data['error'] ??
@@ -479,187 +553,11 @@ class _MerchantLoginScreenState extends State
           _errorMessage = serverAuthError;
         } else {
           _errorMessage =
-              'Server connection failed ($_primaryApiBase). ${lastNetworkError ?? "Internet ba Domain check korun."}';
+              'Server connection failed ($_primaryApiBase). ${lastNetworkError ?? "Internet check korun."}';
         }
       });
     }
-  }
-
-  Future _openDomainAndServerConfigModal() async {
-    final TextEditingController domainCtrl =
-        TextEditingController(text: _activeDomain);
-    final TextEditingController serverCtrl =
-        TextEditingController(text: _customApiBase);
-
-    await showDialog(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          title: Row(
-            children: [
-              Icon(Icons.dns_rounded, color: _brandColor, size: 22),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Text(
-                  'Store Domain & Server Config',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w900,
-                    color: Color(0xFF1E3A1A),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          content: SizedBox(
-            width: 400,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '1. Tenant Store Domain / Subdomain:',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF1E3A1A),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: domainCtrl,
-                    style: const TextStyle(
-                      color: Color(0xFF1E3A1A),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    decoration: InputDecoration(
-                      hintText:
-                          'e.g. nextlook.shop.xylotechsolution.com or buynarabd.com',
-                      hintStyle:
-                          TextStyle(color: Colors.grey.shade500, fontSize: 11.5),
-                      prefixIcon:
-                          Icon(Icons.storefront, color: _brandColor, size: 18),
-                      filled: true,
-                      fillColor: const Color(0xFFF7FAF6),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  const Text(
-                    '2. Backend Server / Custom Host (Optional):',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF1E3A1A),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'খালি রাখলে স্টোরের নিজস্ব ডোমেইন ও ক্লাউডফ্লেয়ার রাউটিং অটোমেটিক কাজ করবে:',
-                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                  ),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: serverCtrl,
-                    style: const TextStyle(
-                      color: Color(0xFF1E3A1A),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    decoration: InputDecoration(
-                      hintText: 'Leave empty for automatic tenant routing',
-                      hintStyle:
-                          TextStyle(color: Colors.grey.shade500, fontSize: 11.5),
-                      prefixIcon: Icon(
-                        Icons.cloud_done_outlined,
-                        color: _brandColor,
-                        size: 18,
-                      ),
-                      filled: true,
-                      fillColor: const Color(0xFFF7FAF6),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: Text(
-                'Cancel',
-                style: TextStyle(
-                  color: Colors.grey.shade700,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            ElevatedButton.icon(
-              onPressed: () async {
-                final String rawDom = domainCtrl.text.trim();
-                final String rawSrv = serverCtrl.text.trim();
-
-                final String cleanedDom = rawDom.isNotEmpty
-                    ? (rawDom.contains('.') || rawDom.contains(':')
-                        ? _cleanHost(rawDom)
-                        : '${_cleanHost(rawDom)}.$_platformRootDomain')
-                    : _platformRootDomain;
-                final String extractedSub = _extractSubdomain(cleanedDom);
-
-                final prefs = await SharedPreferences.getInstance();
-                await prefs.setString('locked_tenant_domain', cleanedDom);
-                await prefs.setString('active_subdomain', extractedSub);
-                await prefs.setString('custom_api_base_url', rawSrv);
-                if (rawSrv.isNotEmpty) {
-                  await prefs.setString('api_base_url', _normalizeUrl(rawSrv));
-                } else {
-                  await prefs.setString(
-                      'api_base_url', _normalizeUrl(cleanedDom));
-                }
-
-                setState(() {
-                  _activeDomain = cleanedDom;
-                  _activeSubdomain = extractedSub;
-                  _customApiBase = rawSrv;
-                  _resolvedWorkingApiBase = '';
-                  _logoUrl = null;
-                  _storeName = extractedSub.isNotEmpty
-                      ? extractedSub.toUpperCase()
-                      : 'MERCHANT PORTAL';
-                  _errorMessage = null;
-                });
-
-                if (ctx.mounted) Navigator.of(ctx).pop();
-                await _fetchStoreBranding();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _brandColor,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              icon: const Icon(Icons.check_circle_outline, size: 16),
-              label: const Text(
-                'Save & Load Store',
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
-              ),
-            ),
-          ],
-        );
-      },
-    );
+    return null;
   }
 
   @override
@@ -690,62 +588,44 @@ class _MerchantLoginScreenState extends State
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Flexible(
-                        child: GestureDetector(
-                          onTap: _openDomainAndServerConfigModal,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 5,
-                            ),
-                            decoration: BoxDecoration(
-                              color: _brandColor.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.language_rounded,
-                                  size: 13,
-                                  color: _brandColor,
-                                ),
-                                const SizedBox(width: 5),
-                                Flexible(
-                                  child: Text(
-                                    _activeDomain.isNotEmpty
-                                        ? _activeDomain
-                                        : _platformRootDomain,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w700,
-                                      color: _brandColor,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                  Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _brandColor.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.lock_outline_rounded,
+                            size: 13,
+                            color: _brandColor,
+                          ),
+                          const SizedBox(width: 5),
+                          Flexible(
+                            child: Text(
+                              _activeDomain.isNotEmpty
+                                  ? _activeDomain
+                                  : _platformRootDomain,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                color: _brandColor,
+                              ),
                             ),
                           ),
-                        ),
+                        ],
                       ),
-                      IconButton(
-                        tooltip: 'Change Store Domain or Server URL',
-                        onPressed: _openDomainAndServerConfigModal,
-                        icon: Icon(
-                          Icons.settings_ethernet_rounded,
-                          color: _brandColor,
-                          size: 20,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 16),
 
-                  // 🌟 ANIMATED STORE LOGO WITH PULSING GLOW
                   Center(
                     child: AnimatedBuilder(
                       animation: _pulseController,
@@ -776,7 +656,7 @@ class _MerchantLoginScreenState extends State
                               ),
                             ),
                             child: ClipOval(
-                              child: _logoUrl != null
+                              child: _logoUrl != null && _logoUrl!.isNotEmpty
                                   ? Image.network(
                                       _logoUrl!,
                                       fit: BoxFit.contain,
@@ -804,7 +684,7 @@ class _MerchantLoginScreenState extends State
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Merchant Portal Login',
+                    'Exclusive Merchant Portal Login',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 13,
@@ -847,7 +727,6 @@ class _MerchantLoginScreenState extends State
                     const SizedBox(height: 18),
                   ],
 
-                  // Email
                   TextFormField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
@@ -888,7 +767,6 @@ class _MerchantLoginScreenState extends State
                   ),
                   const SizedBox(height: 16),
 
-                  // Password
                   TextFormField(
                     controller: _passwordController,
                     obscureText: _obscurePassword,
@@ -943,7 +821,6 @@ class _MerchantLoginScreenState extends State
                   ),
                   const SizedBox(height: 26),
 
-                  // Login Button
                   SizedBox(
                     height: 52,
                     child: ElevatedButton(

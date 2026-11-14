@@ -1,10 +1,12 @@
 // lib/screens/merchant_login_screen.dart
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../core/config/tenant_config.dart';
 import 'admin_dashboard_shell.dart';
 
 class MerchantLoginScreen extends StatefulWidget {
@@ -13,13 +15,7 @@ class MerchantLoginScreen extends StatefulWidget {
 
   const MerchantLoginScreen({
     super.key,
-    this.storeDomain = const String.fromEnvironment(
-      'STORE_DOMAIN',
-      defaultValue: String.fromEnvironment(
-        'DEFAULT_TENANT_DOMAIN',
-        defaultValue: '',
-      ),
-    ),
+    this.storeDomain = TenantConfig.storeDomain,
     this.apiBaseOverride = const String.fromEnvironment(
       'API_BASE_URL',
       defaultValue: '',
@@ -44,34 +40,40 @@ class _MerchantLoginScreenState extends State
   bool _obscurePassword = true;
   String? _errorMessage;
 
-  String _activeDomain = '';
-  String _activeSubdomain = '';
+  String _activeDomain = TenantConfig.storeDomain;
+  String _activeSubdomain = TenantConfig.defaultSubdomain;
   String _resolvedWorkingApiBase = '';
 
-  String _storeName = const String.fromEnvironment(
-    'APP_NAME',
-    defaultValue: 'Merchant Portal',
-  );
+  String _storeName = TenantConfig.defaultAppName;
   String? _logoUrl;
-  Color _brandColor = const Color(0xFF059669);
+  Uint8List? _logoBytes;
+  Color _brandColor =
+      TenantConfig.parseHexColor(TenantConfig.defaultPrimaryColorHex);
 
   late AnimationController _pulseController;
   late Animation _scaleAnimation;
   late Animation _glowAnimation;
 
-  static const String _envSubdomain = String.fromEnvironment(
+  static const String _cmdDomain = String.fromEnvironment(
+    'STORE_DOMAIN',
+    defaultValue: String.fromEnvironment(
+      'DEFAULT_TENANT_DOMAIN',
+      defaultValue: '',
+    ),
+  );
+  static const String _cmdSubdomain = String.fromEnvironment(
     'TENANT_SUBDOMAIN',
     defaultValue: '',
   );
-  static const String _envAppName = String.fromEnvironment(
+  static const String _cmdAppName = String.fromEnvironment(
     'APP_NAME',
     defaultValue: '',
   );
-  static const String _envAppIconUrl = String.fromEnvironment(
+  static const String _cmdAppIconUrl = String.fromEnvironment(
     'APP_ICON_URL',
     defaultValue: '',
   );
-  static const String _envPrimaryColor = String.fromEnvironment(
+  static const String _cmdPrimaryColor = String.fromEnvironment(
     'PRIMARY_COLOR',
     defaultValue: '',
   );
@@ -119,6 +121,19 @@ class _MerchantLoginScreenState extends State
     return null;
   }
 
+  Uint8List? _decodeBase64Icon(String? rawB64) {
+    if (rawB64 == null || rawB64.trim().isEmpty) return null;
+    try {
+      String clean = rawB64.trim();
+      if (clean.contains(',')) {
+        clean = clean.split(',').last.trim();
+      }
+      final bytes = base64Decode(clean);
+      if (bytes.isNotEmpty) return bytes;
+    } catch (_) {}
+    return null;
+  }
+
   String _cleanHost(String raw) {
     String d = raw.trim().toLowerCase();
     d = d.replaceAll('https://', '').replaceAll('http://', '');
@@ -131,7 +146,7 @@ class _MerchantLoginScreenState extends State
   String _extractSubdomain(String rawDomain) {
     final String clean = _cleanHost(rawDomain);
     if (clean.isEmpty) {
-      return _envSubdomain.isNotEmpty ? _envSubdomain.toLowerCase() : '';
+      return TenantConfig.defaultSubdomain.toLowerCase();
     }
     final String withoutPort = clean.split(':').first;
     final List parts = withoutPort.split('.');
@@ -150,7 +165,7 @@ class _MerchantLoginScreenState extends State
         return parts[1].toString();
       }
     }
-    return _envSubdomain.isNotEmpty ? _envSubdomain.toLowerCase() : withoutPort;
+    return TenantConfig.defaultSubdomain.toLowerCase();
   }
 
   String _normalizeUrl(String rawUrl) {
@@ -172,10 +187,25 @@ class _MerchantLoginScreenState extends State
     return clean;
   }
 
-  Future _loadEmbeddedTenantConfigJson() async {
-    if (kIsWeb && widget.storeDomain.trim().isNotEmpty) {
-      return {};
+  String _rewriteLogoUrlForDomain(String? rawUrl, String domain) {
+    if (rawUrl == null || rawUrl.trim().isEmpty) return '';
+    String u = rawUrl.trim();
+    final String cleanDom = _cleanHost(domain);
+    final String targetHost =
+        cleanDom.isNotEmpty ? cleanDom : _platformRootDomain;
+    if (u.startsWith('/')) {
+      return 'https://$targetHost$u';
     }
+    if (u.contains('127.0.0.1') || u.contains('localhost')) {
+      final int mediaIdx = u.indexOf('/media/');
+      if (mediaIdx != -1) {
+        return 'https://$targetHost${u.substring(mediaIdx)}';
+      }
+    }
+    return u;
+  }
+
+  Future _loadEmbeddedTenantConfigJson() async {
     for (final path in ['assets/tenant_config.json', 'tenant_config.json']) {
       try {
         final String raw = await rootBundle.loadString(path);
@@ -188,61 +218,159 @@ class _MerchantLoginScreenState extends State
     return {};
   }
 
+  Future _loadEmbeddedAssetIconBytes() async {
+    if (kIsWeb) return null;
+    for (final path in [
+      'assets/icon/app_icon.png',
+      'assets/images/app_icon.png',
+      'assets/app_icon.png',
+    ]) {
+      try {
+        final byteData = await rootBundle.load(path);
+        final bytes = byteData.buffer.asUint8List();
+        if (bytes.isNotEmpty) return bytes;
+      } catch (_) {}
+    }
+    return null;
+  }
+
   Future _initLockedTenantAndFetchBranding() async {
     final prefs = await SharedPreferences.getInstance();
     final dynamic embeddedRaw = await _loadEmbeddedTenantConfigJson();
     final Map embedded = embeddedRaw is Map ? embeddedRaw : {};
 
-    // 1. PRIORITY 1: Explicit --dart-define=STORE_DOMAIN / TENANT_SUBDOMAIN
-    String lockedDomain = widget.storeDomain.trim();
-    String lockedSub = _envSubdomain.trim().toLowerCase();
-
-    if (lockedDomain.isNotEmpty && lockedSub.isEmpty) {
-      lockedSub = _extractSubdomain(lockedDomain);
-    } else if (lockedSub.isNotEmpty && lockedDomain.isEmpty) {
-      lockedDomain = '$lockedSub.$_platformRootDomain';
-    }
-
-    // 2. PRIORITY 2: Embedded tenant_config.json (used in patched APKs when --dart-define wasn't passed)
     final String embSub =
         (embedded['subdomain'] ?? '').toString().trim().toLowerCase();
     final String embDom = (embedded['store_domain'] ?? '').toString().trim();
+    final String embName =
+        (embedded['store_name'] ?? embedded['app_name'] ?? '')
+            .toString()
+            .trim();
+    final String embIconUrl =
+        (embedded['app_icon_url'] ?? '').toString().trim();
+    final String embIconB64 =
+        (embedded['app_icon_base64'] ?? '').toString().trim();
+    final String embColor =
+        (embedded['primary_color'] ?? '').toString().trim();
 
-    if (lockedDomain.isEmpty && embDom.isNotEmpty) {
-      lockedDomain = embDom;
-    }
-    if (lockedSub.isEmpty && embSub.isNotEmpty) {
-      lockedSub = embSub;
-    }
+    String lockedDomain = '';
+    String lockedSub = '';
 
-    // 3. PRIORITY 3: Saved SharedPreferences fallback
-    if (lockedDomain.isEmpty) {
-      final String savedDom = prefs.getString('locked_tenant_domain') ?? '';
-      if (savedDom.isNotEmpty) {
-        lockedDomain = savedDom;
-        lockedSub = _extractSubdomain(savedDom);
+    if (kIsWeb) {
+      if (_cmdDomain.trim().isNotEmpty) {
+        lockedDomain = _cmdDomain.trim();
+      } else if (widget.storeDomain.trim().isNotEmpty) {
+        lockedDomain = widget.storeDomain.trim();
+      } else if (embDom.isNotEmpty) {
+        lockedDomain = embDom;
+      } else {
+        lockedDomain = TenantConfig.storeDomain.trim();
+      }
+
+      if (_cmdSubdomain.trim().isNotEmpty) {
+        lockedSub = _cmdSubdomain.trim().toLowerCase();
+      } else if (lockedDomain.isNotEmpty) {
+        lockedSub = _extractSubdomain(lockedDomain);
+      } else if (embSub.isNotEmpty) {
+        lockedSub = embSub;
+      } else {
+        lockedSub = TenantConfig.defaultSubdomain.trim().toLowerCase();
+      }
+    } else {
+      if (embDom.isNotEmpty) {
+        lockedDomain = embDom;
+      } else if (_cmdDomain.trim().isNotEmpty) {
+        lockedDomain = _cmdDomain.trim();
+      } else if (TenantConfig.storeDomain.trim().isNotEmpty) {
+        lockedDomain = TenantConfig.storeDomain.trim();
+      } else {
+        lockedDomain = widget.storeDomain.trim();
+      }
+
+      if (embSub.isNotEmpty) {
+        lockedSub = embSub;
+      } else if (lockedDomain.isNotEmpty) {
+        lockedSub = _extractSubdomain(lockedDomain);
+      } else if (_cmdSubdomain.trim().isNotEmpty) {
+        lockedSub = _cmdSubdomain.trim().toLowerCase();
+      } else {
+        lockedSub = TenantConfig.defaultSubdomain.trim().toLowerCase();
       }
     }
 
-    // Only use embedded branding (name/icon/color) if embedded subdomain matches our active lockedSub!
-    final bool useEmbeddedBranding =
+    if (lockedDomain.isEmpty && lockedSub.isNotEmpty) {
+      lockedDomain = '$lockedSub.$_platformRootDomain';
+    }
+    if (lockedSub.isEmpty && lockedDomain.isNotEmpty) {
+      lockedSub = _extractSubdomain(lockedDomain);
+    }
+
+    final bool matchesEmbedded =
         embSub.isNotEmpty && lockedSub.isNotEmpty && embSub == lockedSub;
+    final bool matchesTenantConfig =
+        TenantConfig.defaultSubdomain.trim().toLowerCase() == lockedSub;
 
-    String lockedName = _envAppName.trim();
-    if (lockedName.isEmpty && useEmbeddedBranding) {
-      lockedName = (embedded['store_name'] ?? embedded['app_name'] ?? '')
-          .toString()
-          .trim();
+    String lockedName = '';
+    if (matchesEmbedded && embName.isNotEmpty) {
+      lockedName = embName;
+    } else if (_cmdAppName.trim().isNotEmpty &&
+        (!kIsWeb ||
+            _cmdSubdomain.isEmpty ||
+            _cmdSubdomain.toLowerCase() == lockedSub)) {
+      lockedName = _cmdAppName.trim();
+    } else if (matchesTenantConfig &&
+        TenantConfig.defaultAppName.trim().isNotEmpty) {
+      lockedName = TenantConfig.defaultAppName.trim();
+    } else if (lockedSub.isNotEmpty) {
+      lockedName =
+          '${lockedSub[0].toUpperCase()}${lockedSub.substring(1)}';
     }
 
-    String lockedIcon = _envAppIconUrl.trim();
-    if (lockedIcon.isEmpty && useEmbeddedBranding) {
-      lockedIcon = (embedded['app_icon_url'] ?? '').toString().trim();
+    String lockedColorHex = '';
+    if (matchesEmbedded && embColor.isNotEmpty) {
+      lockedColorHex = embColor;
+    } else if (_cmdPrimaryColor.trim().isNotEmpty) {
+      lockedColorHex = _cmdPrimaryColor.trim();
+    } else if (matchesTenantConfig &&
+        TenantConfig.defaultPrimaryColorHex.trim().isNotEmpty) {
+      lockedColorHex = TenantConfig.defaultPrimaryColorHex.trim();
     }
 
-    String lockedColorHex = _envPrimaryColor.trim();
-    if (lockedColorHex.isEmpty && useEmbeddedBranding) {
-      lockedColorHex = (embedded['primary_color'] ?? '').toString().trim();
+    String lockedIconUrl = '';
+    if (matchesEmbedded && embIconUrl.isNotEmpty) {
+      lockedIconUrl = embIconUrl;
+    } else if (_cmdAppIconUrl.trim().isNotEmpty) {
+      lockedIconUrl = _cmdAppIconUrl.trim();
+    } else if (matchesTenantConfig &&
+        TenantConfig.defaultAppIconUrl.trim().isNotEmpty) {
+      lockedIconUrl = TenantConfig.defaultAppIconUrl.trim();
+    }
+    lockedIconUrl = _rewriteLogoUrlForDomain(lockedIconUrl, lockedDomain);
+
+    Uint8List? resolvedIconBytes;
+    if (matchesEmbedded && embIconB64.isNotEmpty) {
+      resolvedIconBytes = _decodeBase64Icon(embIconB64);
+    }
+    if (resolvedIconBytes == null &&
+        matchesTenantConfig &&
+        TenantConfig.defaultAppIconBase64.isNotEmpty) {
+      resolvedIconBytes = _decodeBase64Icon(TenantConfig.defaultAppIconBase64);
+    }
+    if (resolvedIconBytes == null && !kIsWeb) {
+      final dynamic assetBytes = await _loadEmbeddedAssetIconBytes();
+      if (assetBytes is Uint8List) {
+        resolvedIconBytes = assetBytes;
+      }
+    }
+
+    final String prevSub =
+        (prefs.getString('active_subdomain') ?? '').trim().toLowerCase();
+    if (prevSub.isNotEmpty && lockedSub.isNotEmpty && prevSub != lockedSub) {
+      await prefs.remove('merchant_token');
+      await prefs.remove('merchant_jwt_token');
+      await prefs.remove('merchant_refresh_token');
+      await prefs.remove('store_name');
+      await prefs.remove('store_logo');
     }
 
     if (lockedDomain.isNotEmpty) {
@@ -259,10 +387,13 @@ class _MerchantLoginScreenState extends State
         _activeSubdomain = lockedSub;
         if (lockedName.isNotEmpty) {
           _storeName = lockedName;
-        } else if (_activeSubdomain.isNotEmpty) {
-          _storeName = _activeSubdomain.toUpperCase();
         }
-        _logoUrl = lockedIcon.isNotEmpty ? lockedIcon : null;
+        if (resolvedIconBytes != null && resolvedIconBytes.isNotEmpty) {
+          _logoBytes = resolvedIconBytes;
+        }
+        if (lockedIconUrl.isNotEmpty) {
+          _logoUrl = lockedIconUrl;
+        }
         final Color? parsedColor = _parseHexColor(lockedColorHex);
         if (parsedColor != null) {
           _brandColor = parsedColor;
@@ -330,65 +461,96 @@ class _MerchantLoginScreenState extends State
 
   Future _fetchStoreBranding() async {
     final List candidates = _buildCandidateApiBases();
+    final String subQuery = _activeSubdomain.isNotEmpty
+        ? '?subdomain=${Uri.encodeComponent(_activeSubdomain)}'
+        : '';
 
     for (final dynamic cand in candidates) {
       final String base = cand.toString();
-      try {
-        final String subQuery = _activeSubdomain.isNotEmpty
-            ? '?subdomain=${Uri.encodeComponent(_activeSubdomain)}'
-            : '';
-        final Uri settingsUri =
-            Uri.parse('$base/api/v1/stores/settings/$subQuery');
+      for (final String endpoint in [
+        '/api/v1/stores/tenant/resolve/$subQuery',
+        '/api/v1/stores/settings/$subQuery',
+      ]) {
+        try {
+          final Uri uri = Uri.parse('$base$endpoint');
+          final res = await http
+              .get(uri, headers: _buildTenantHeaders())
+              .timeout(const Duration(seconds: 6));
 
-        final res = await http
-            .get(settingsUri, headers: _buildTenantHeaders())
-            .timeout(const Duration(seconds: 6));
+          if (res.statusCode == 200) {
+            final dynamic data = _safeJsonDecode(res.body);
+            if (data is Map) {
+              _resolvedWorkingApiBase = base;
+              final Map brandingMap = (data['branding'] is Map)
+                  ? Map.from(data['branding'] as Map)
+                  : {};
+              final Map appDist = (data['app_distribution'] is Map)
+                  ? Map.from(data['app_distribution'] as Map)
+                  : {};
 
-        if (res.statusCode == 200) {
-          final dynamic data = _safeJsonDecode(res.body);
-          if (data is Map) {
-            _resolvedWorkingApiBase = base;
-            final Map appDist = (data['app_distribution'] is Map)
-                ? Map.from(data['app_distribution'] as Map)
-                : {};
-            final dynamic rawLogo =
-                appDist['app_icon_url'] ?? data['logo'] ?? data['store_logo'];
-            String? resolvedLogo;
+              final String rawB64 = (brandingMap['app_icon_base64'] ??
+                      appDist['app_icon_base64'] ??
+                      data['app_icon_base64'] ??
+                      '')
+                  .toString()
+                  .trim();
+              final Uint8List? fetchedB64Bytes = _decodeBase64Icon(rawB64);
 
-            if (rawLogo is String && rawLogo.isNotEmpty) {
-              resolvedLogo =
-                  rawLogo.startsWith('http') ? rawLogo : '$base$rawLogo';
-            } else if (rawLogo is Map && rawLogo['url'] != null) {
-              final String urlStr = rawLogo['url'].toString();
-              resolvedLogo =
-                  urlStr.startsWith('http') ? urlStr : '$base$urlStr';
+              final dynamic rawLogo = brandingMap['app_icon'] ??
+                  brandingMap['logo'] ??
+                  appDist['app_icon_url'] ??
+                  data['logo'] ??
+                  data['store_logo'];
+              String? resolvedLogo;
+
+              if (rawLogo is String && rawLogo.isNotEmpty) {
+                resolvedLogo = rawLogo.startsWith('http')
+                    ? rawLogo
+                    : '$base$rawLogo';
+              } else if (rawLogo is Map && rawLogo['url'] != null) {
+                final String urlStr = rawLogo['url'].toString();
+                resolvedLogo =
+                    urlStr.startsWith('http') ? urlStr : '$base$urlStr';
+              }
+              if (resolvedLogo != null && resolvedLogo.isNotEmpty) {
+                resolvedLogo =
+                    _rewriteLogoUrlForDomain(resolvedLogo, _activeDomain);
+              }
+
+              if (mounted) {
+                setState(() {
+                  final String fetchedName = (data['store_name'] ??
+                          brandingMap['app_name'] ??
+                          appDist['app_name'] ??
+                          '')
+                      .toString()
+                      .trim();
+                  if (fetchedName.isNotEmpty) {
+                    _storeName = fetchedName;
+                  }
+                  if (fetchedB64Bytes != null && fetchedB64Bytes.isNotEmpty) {
+                    _logoBytes = fetchedB64Bytes;
+                  }
+                  if (resolvedLogo != null && resolvedLogo.isNotEmpty) {
+                    _logoUrl = resolvedLogo;
+                  }
+                  final Color? parsedColor = _parseHexColor(
+                    (data['primary_color'] ??
+                            brandingMap['primary_color'] ??
+                            appDist['primary_color'] ??
+                            '')
+                        .toString(),
+                  );
+                  if (parsedColor != null) {
+                    _brandColor = parsedColor;
+                  }
+                });
+              }
+              return null;
             }
-
-            if (mounted) {
-              setState(() {
-                final String fetchedName =
-                    (data['store_name'] ?? appDist['app_name'] ?? '')
-                        .toString()
-                        .trim();
-                if (fetchedName.isNotEmpty) {
-                  _storeName = fetchedName;
-                }
-                if (resolvedLogo != null && resolvedLogo.isNotEmpty) {
-                  _logoUrl = resolvedLogo;
-                }
-                final Color? parsedColor = _parseHexColor(
-                  (data['primary_color'] ?? appDist['primary_color'] ?? '')
-                      .toString(),
-                );
-                if (parsedColor != null) {
-                  _brandColor = parsedColor;
-                }
-              });
-            }
-            return null;
           }
-        }
-      } catch (_) {}
+        } catch (_) {}
+      }
     }
     return null;
   }
@@ -474,7 +636,6 @@ class _MerchantLoginScreenState extends State
                 .trim()
                 .toLowerCase();
 
-            // Strict Tenant Check: Only the owner of this locked store can log in
             if (_activeSubdomain.isNotEmpty &&
                 returnedSubdomain.isNotEmpty &&
                 returnedSubdomain != _activeSubdomain.toLowerCase()) {
@@ -558,6 +719,24 @@ class _MerchantLoginScreenState extends State
       });
     }
     return null;
+  }
+
+  Widget _buildLogoWidget() {
+    if (_logoBytes != null && _logoBytes!.isNotEmpty) {
+      return Image.memory(
+        _logoBytes!,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => _buildFallbackIcon(),
+      );
+    }
+    if (_logoUrl != null && _logoUrl!.isNotEmpty) {
+      return Image.network(
+        _logoUrl!,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => _buildFallbackIcon(),
+      );
+    }
+    return _buildFallbackIcon();
   }
 
   @override
@@ -656,14 +835,7 @@ class _MerchantLoginScreenState extends State
                               ),
                             ),
                             child: ClipOval(
-                              child: _logoUrl != null && _logoUrl!.isNotEmpty
-                                  ? Image.network(
-                                      _logoUrl!,
-                                      fit: BoxFit.contain,
-                                      errorBuilder: (_, __, ___) =>
-                                          _buildFallbackIcon(),
-                                    )
-                                  : _buildFallbackIcon(),
+                              child: _buildLogoWidget(),
                             ),
                           ),
                         );
@@ -868,10 +1040,19 @@ class _MerchantLoginScreenState extends State
   }
 
   Widget _buildFallbackIcon() {
+    final String initial =
+        _storeName.trim().isNotEmpty ? _storeName.trim()[0].toUpperCase() : 'M';
     return Container(
-      color: _brandColor.withValues(alpha: 0.12),
+      color: _brandColor,
       child: Center(
-        child: Icon(Icons.storefront_rounded, color: _brandColor, size: 40),
+        child: Text(
+          initial,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 38,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
       ),
     );
   }

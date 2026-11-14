@@ -1,5 +1,8 @@
 // lib/main.dart
+import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'core/config/tenant_config.dart';
@@ -7,23 +10,46 @@ import 'providers/admin_provider.dart';
 import 'screens/merchant_login_screen.dart';
 import 'screens/admin_dashboard_shell.dart';
 
+Future _readEmbeddedConfig() async {
+  for (final path in ['assets/tenant_config.json', 'tenant_config.json']) {
+    try {
+      final raw = await rootBundle.loadString(path);
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) return decoded;
+    } catch (_) {}
+  }
+  return {};
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  const String envDomain = TenantConfig.storeDomain;
-  const String envSub = TenantConfig.defaultSubdomain;
+  final dynamic embeddedRaw = await _readEmbeddedConfig();
+  final Map embedded = embeddedRaw is Map ? embeddedRaw : {};
+  final String embDom = (embedded['store_domain'] ?? '').toString().trim();
+  final String embSub =
+      (embedded['subdomain'] ?? '').toString().trim().toLowerCase();
+
+  String activeDom = TenantConfig.storeDomain.trim();
+  String activeSub = TenantConfig.defaultSubdomain.trim().toLowerCase();
+
+  if (!kIsWeb && embDom.isNotEmpty) {
+    activeDom = embDom;
+  }
+  if (!kIsWeb && embSub.isNotEmpty) {
+    activeSub = embSub;
+  }
 
   final prefs = await SharedPreferences.getInstance();
 
-  if (envDomain.trim().isNotEmpty || envSub.trim().isNotEmpty) {
-    String cleanDom = envDomain
-        .trim()
+  if (activeDom.isNotEmpty || activeSub.isNotEmpty) {
+    String cleanDom = activeDom
         .toLowerCase()
         .replaceAll('https://', '')
         .replaceAll('http://', '')
         .split('/')
         .first;
-    String newSub = envSub.trim().toLowerCase();
+    String newSub = activeSub;
     if (newSub.isEmpty && cleanDom.isNotEmpty) {
       newSub = cleanDom.split('.').first;
     }
@@ -59,7 +85,7 @@ void main() async {
       ],
       child: MerchantPortalApp(
         isLoggedIn: isLoggedIn,
-        storeDomain: envDomain,
+        storeDomain: activeDom,
       ),
     ),
   );

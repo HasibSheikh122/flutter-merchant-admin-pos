@@ -2,7 +2,6 @@
   "tenant_id": 23,
   "subdomain": "bestbdbazar",
   "store_domain": "bestbdbazar.shop.xylotechsolution.com",
-  "default_tenant_domain": "bestbdbazar.shop.xylotechsolution.com",
   "api_base_url": "https://bestbdbazar.shop.xylotechsolution.com",
   "app_name": "BestBdBazar Admin",
   "store_name": "BestBdBazar",

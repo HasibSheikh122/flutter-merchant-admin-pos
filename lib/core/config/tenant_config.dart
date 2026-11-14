@@ -19,7 +19,7 @@ class TenantConfig {
 
   static const String defaultAppName = String.fromEnvironment(
     'APP_NAME',
-    defaultValue: 'BestBdBazar Admin',
+    defaultValue: 'BestBDbazar',
   );
 
   static const String defaultAppSlogan = String.fromEnvironment(
@@ -29,17 +29,19 @@ class TenantConfig {
 
   static const String defaultAppIconUrl = String.fromEnvironment(
     'APP_ICON_URL',
-    defaultValue: 'https://bestbdbazar.shop.xylotechsolution.com/media/stores/apps/icons/footerlogo_1hq658A.png',
+    defaultValue: '',
   );
+
+  static const String defaultAppIconBase64 = '';
 
   static const String defaultPrimaryColorHex = String.fromEnvironment(
     'PRIMARY_COLOR',
-    defaultValue: '#EA580C',
+    defaultValue: '#059669',
   );
 
   static const String defaultSecondaryColorHex = String.fromEnvironment(
     'SECONDARY_COLOR',
-    defaultValue: '#C2410C',
+    defaultValue: '#047857',
   );
 
   static const String defaultBundleId = String.fromEnvironment(
@@ -52,10 +54,10 @@ class TenantConfig {
     defaultValue: true,
   );
 
-  // Backwards-compatible aliases
   static const String compileTimeStoreDomain = storeDomain;
   static const String compileTimeSubdomain = defaultSubdomain;
-  static const int compileTimeTenantId = int.fromEnvironment('TENANT_ID', defaultValue: 23);
+  static const int compileTimeTenantId =
+      int.fromEnvironment('TENANT_ID', defaultValue: 0);
   static const String compileTimeAppName = defaultAppName;
   static const String compileTimePrimaryColor = defaultPrimaryColorHex;
   static const String compileTimeAppIconUrl = defaultAppIconUrl;
@@ -65,13 +67,16 @@ class TenantConfig {
     if (clean.isEmpty) clean = storeDomain;
     clean = clean.replaceAll('https://', '').replaceAll('http://', '');
     if (clean.contains('/')) clean = clean.split('/').first;
-    if (clean.startsWith('localhost') || clean.startsWith('127.0.0.1') || clean.startsWith('10.0.2.2')) {
+    if (clean.startsWith('localhost') ||
+        clean.startsWith('127.0.0.1') ||
+        clean.startsWith('10.0.2.2')) {
       return 'http://$clean';
     }
     return 'https://$clean';
   }
 
-  static Color parseHexColor(String? hex, {Color fallback = const Color(0xFF059669)}) {
+  static Color parseHexColor(String? hex,
+      {Color fallback = const Color(0xFF059669)}) {
     if (hex == null || hex.trim().isEmpty) return fallback;
     String clean = hex.replaceAll('#', '').trim();
     if (clean.length == 6) clean = 'FF$clean';

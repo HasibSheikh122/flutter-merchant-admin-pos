@@ -27,8 +27,7 @@ void main() async {
   final dynamic embeddedRaw = await _readEmbeddedConfig();
   final Map embedded = embeddedRaw is Map ? embeddedRaw : {};
   final String embDom = (embedded['store_domain'] ?? '').toString().trim();
-  final String embSub =
-      (embedded['subdomain'] ?? '').toString().trim().toLowerCase();
+  final String embSub = (embedded['subdomain'] ?? '').toString().trim().toLowerCase();
 
   String activeDom = TenantConfig.storeDomain.trim();
   String activeSub = TenantConfig.defaultSubdomain.trim().toLowerCase();

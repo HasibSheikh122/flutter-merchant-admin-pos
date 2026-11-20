@@ -20,8 +20,8 @@ if (project.hasProperty("dart-defines")) {
     }
 }
 
-val resolvedBundleId = dartDefines["BUNDLE_ID"]?.takeIf { it.isNotBlank() } ?: "com.xylosaas.buynarabd.admin"
-val resolvedAppName = dartDefines["APP_NAME"]?.takeIf { it.isNotBlank() } ?: "Buynara Admin"
+val resolvedBundleId = dartDefines["BUNDLE_ID"]?.takeIf { it.isNotBlank() } ?: "com.xylosaas.bestbdbazar.admin"
+val resolvedAppName = dartDefines["APP_NAME"]?.takeIf { it.isNotBlank() } ?: "BestBdBazar Admin"
 
 android {
     namespace = "com.xylosaas.xylo_merchant_admin"

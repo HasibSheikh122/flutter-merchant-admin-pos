@@ -232,7 +232,7 @@ class MarketingUi {
           const SizedBox(height: 6),
         ],
         DropdownButtonFormField(
-          initialValue: value,
+          value: value,
           dropdownColor: modalBg(t),
           isExpanded: true,
           iconEnabledColor: textColor(t),

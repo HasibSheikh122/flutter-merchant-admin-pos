@@ -1914,7 +1914,7 @@ class _ShopsOutletsViewState extends State {
               ),
               Switch(
                 value: isActive,
-                activeThumbColor: t.primaryColor,
+                activeColor: t.primaryColor,
                 onChanged: (v) => _toggleShopActive(shop, v),
               ),
             ],
@@ -2445,7 +2445,7 @@ class _ShopsOutletsViewState extends State {
           const SizedBox(height: 10),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
-            activeThumbColor: t.primaryColor,
+            activeColor: t.primaryColor,
             title: Text(
               'Shop Active on Storefront',
               style: TextStyle(

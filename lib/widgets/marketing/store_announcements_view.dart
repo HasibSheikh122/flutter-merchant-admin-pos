@@ -543,7 +543,7 @@ class _StoreAnnouncementsViewState extends State {
                                 ),
                                 Switch(
                                   value: syncHeader,
-                                  activeThumbColor: Colors.white,
+                                  activeColor: Colors.white,
                                   activeTrackColor: t.primaryColor,
                                   onChanged: (v) =>
                                       setModalState(() => syncHeader = v),
@@ -565,7 +565,7 @@ class _StoreAnnouncementsViewState extends State {
                                 ),
                                 Switch(
                                   value: isActive,
-                                  activeThumbColor: Colors.white,
+                                  activeColor: Colors.white,
                                   activeTrackColor: t.primaryColor,
                                   onChanged: (v) =>
                                       setModalState(() => isActive = v),

@@ -1477,7 +1477,7 @@ class _AffiliateMarketingViewState extends State<AffiliateMarketingView> {
                       ),
                       Switch(
                         value: _autoApproveAffiliates,
-                        activeThumbColor: Colors.white,
+                        activeColor: Colors.white,
                         activeTrackColor: t.primaryColor,
                         onChanged: (val) {
                           setState(() => _autoApproveAffiliates = val);

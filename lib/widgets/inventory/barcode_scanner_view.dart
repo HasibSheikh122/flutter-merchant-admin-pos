@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import '../catalog/catalog_theme_scope.dart';
 import 'inventory_modals.dart';
+import '../../core/config/tenant_config.dart';
 
 class BarcodeScannerView extends StatefulWidget {
   final bool isDarkMode;
@@ -48,7 +49,7 @@ class _BarcodeScannerViewState extends State<BarcodeScannerView> {
         useGradient: true,
         isDarkMode: widget.isDarkMode,
         apiBase: 'https://nextlook.shop.xylotechsolution.com',
-        subdomain: 'buynarabd',
+        subdomain: TenantConfig.defaultSubdomain,
         token: '',
       );
 

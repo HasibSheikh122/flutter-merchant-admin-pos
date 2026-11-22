@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../catalog/catalog_theme_scope.dart';
+import '../../core/config/tenant_config.dart';
 
 class CourierServiceView extends StatefulWidget {
   final bool isDarkMode;
@@ -35,7 +36,7 @@ class _CourierServiceViewState extends State<CourierServiceView> {
   CatalogThemeConfig _theme = const CatalogThemeConfig();
 
   String _apiBase = 'https://nextlook.shop.xylotechsolution.com';
-  String _subdomain = 'buynarabd';
+  String _subdomain = TenantConfig.defaultSubdomain;
   String _token = '';
 
   // 1. Courier Provider Configs State
@@ -165,7 +166,7 @@ class _CourierServiceViewState extends State<CourierServiceView> {
     await _loadTheme();
     final prefs = await SharedPreferences.getInstance();
     _token = prefs.getString('merchant_token') ?? '';
-    _subdomain = prefs.getString('active_subdomain') ?? 'buynarabd';
+    _subdomain = prefs.getString('active_subdomain') ?? TenantConfig.defaultSubdomain;
     String base = prefs.getString('api_base_url') ?? 'https://nextlook.shop.xylotechsolution.com';
     if (base.endsWith('/')) {
       base = base.substring(0, base.length - 1);

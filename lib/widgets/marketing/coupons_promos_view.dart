@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../catalog/catalog_theme_scope.dart';
 import 'marketing_promos_view.dart';
+import '../../core/config/tenant_config.dart';
 
 class CouponsPromosView extends StatefulWidget {
   final bool isDarkMode;
@@ -156,7 +157,7 @@ class _CouponsPromosViewState extends State {
       subdomain = cleanDom.split('.').first;
     }
     if (subdomain.isEmpty) {
-      subdomain = _theme.subdomain.isNotEmpty ? _theme.subdomain : 'bestbdbazar';
+      subdomain = _theme.subdomain.isNotEmpty ? _theme.subdomain : TenantConfig.defaultSubdomain;
     }
     if (domain.isEmpty) {
       domain = '$subdomain.shop.xylotechsolution.com';

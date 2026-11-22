@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../core/config/tenant_config.dart';
 
 class GeneralSettingsView extends StatefulWidget {
   final bool isDarkMode;
@@ -27,7 +28,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
   bool _isLoading = true;
   bool _isSaving = false;
 
-  String _subdomain = 'bestbdbazar';
+  String _subdomain = TenantConfig.defaultSubdomain;
   String _apiBase = 'https://nextlook.shop.xylotechsolution.com';
   String _token = '';
 
@@ -225,7 +226,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
 
     final prefs = await SharedPreferences.getInstance();
     _token = prefs.getString('merchant_token') ?? '';
-    _subdomain = prefs.getString('active_subdomain') ?? 'bestbdbazar';
+    _subdomain = prefs.getString('active_subdomain') ?? TenantConfig.defaultSubdomain;
     _apiBase = prefs.getString('api_base_url') ?? 'https://nextlook.shop.xylotechsolution.com';
     if (_apiBase.endsWith('/')) {
       _apiBase = _apiBase.substring(0, _apiBase.length - 1);
